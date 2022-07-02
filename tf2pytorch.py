@@ -1,4 +1,4 @@
-mapping_256 = {
+mapping = {
 "G_mapping/Dense0/weight":"style.1.weight",
 "G_mapping/Dense0/bias":"style.1.bias",
 "G_mapping/Dense1/weight":"style.2.weight",
@@ -185,51 +185,70 @@ import dnnlib.tflib as tflib
 import torch
 import numpy as np
 import re 
-
-tflib.init_tf()
-with open('stylegan2-car-config-f.pkl', 'rb') as f:
-    G, D, Gs = pickle.load(f, encoding='latin1')
+import argparse
 
 
-data2 = torch.load('stylegan2_networks_stylegan2-car-config-f.pt')
+def main(tf_cp, output_path, compare = False, torch_cp = None):
+    tflib.init_tf()
+    with open(tf_cp, 'rb') as f:
+        G, D, Gs = pickle.load(f, encoding='latin1')
 
-output = {}
+    if compare:
+        data2 = torch.load(torch_cp)
 
-for k,v in Gs.vars.items():
-    data = v.eval() 
-    if len(data.shape) == 0:
-        output[mapping_256[k]] = torch.tensor([data])
-    else:
-        if re.match(r'.*modulation.bias',mapping_256[k]):
-            data = data + 1
-        
-        elif re.match(r'.*modulation.weight',mapping_256[k]):
-            data = np.transpose(data)
+    output = {}
 
-        elif re.match(r'.*conv.weight',mapping_256[k]):
-            if len(data.shape) == 4:
-                if mapping_256[k] in ['convs.0.conv.weight','convs.2.conv.weight','convs.4.conv.weight','convs.6.conv.weight','convs.8.conv.weight','convs.10.conv.weight','convs.12.conv.weight']:
-                    data = np.transpose(data, (3, 2, 0, 1))[:,:,[2,1,0],:][:,:,:,[2,1,0]]
-                    data = np.expand_dims(data, 0)
-                    
-                else:
-                    data = np.expand_dims(np.transpose(data, (-1, -2, 0, 1)),0)
+    for k,v in Gs.vars.items():
+        data = v.eval() 
+        if len(data.shape) == 0:
+            output[mapping[k]] = torch.tensor([data])
+        else:
+            if re.match(r'.*modulation.bias',mapping[k]):
+                data = data + 1
+            
+            elif re.match(r'.*modulation.weight',mapping[k]):
+                data = np.transpose(data)
 
-        elif re.match(r'to_rgb.*bias',mapping_256[k]):
-            data = np.expand_dims(np.expand_dims(np.expand_dims(data, 0), -1), -1)
+            elif re.match(r'.*conv.weight',mapping[k]):
+                if len(data.shape) == 4:
+                    if mapping[k] in ['convs.0.conv.weight','convs.2.conv.weight','convs.4.conv.weight','convs.6.conv.weight','convs.8.conv.weight','convs.10.conv.weight','convs.12.conv.weight']:
+                        data = np.transpose(data, (3, 2, 0, 1))[:,:,[2,1,0],:][:,:,:,[2,1,0]]
+                        data = np.expand_dims(data, 0)
+                        
+                    else:
+                        data = np.expand_dims(np.transpose(data, (-1, -2, 0, 1)),0)
 
-        elif re.match(r'style.*weight', mapping_256[k]):
-            data = np.transpose(data)
+            elif re.match(r'to_rgb.*bias',mapping[k]):
+                data = np.expand_dims(np.expand_dims(np.expand_dims(data, 0), -1), -1)
+
+            elif re.match(r'style.*weight', mapping[k]):
+                data = np.transpose(data)
 
 
-        output[mapping_256[k]] = torch.tensor(data)
+            output[mapping[k]] = torch.tensor(data)
+    if compare:
+        diff = 0
+        for k,v in output.items():
+            if k in data2['g_ema']:
+                diff += np.mean(np.abs(data2['g_ema'][k].numpy() - v.numpy()))
 
-diff = 0
-for k,v in output.items():
-    if k in data2['g_ema']:
-        diff += np.mean(np.abs(data2['g_ema'][k].numpy() - v.numpy()))
+        print(diff)
 
-print(diff)
+    with open(output_path, 'wb') as f:
+        pickle.dump(output, f)
 
-with open('stylegan2_pytorch.pkl', 'wb') as f:
-    pickle.dump(output, f)
+
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser()
+
+    parser.add_argument('--tf_cp', type=str, default='stylegan2-car-config-f.pkl')
+
+    parser.add_argument('--compare', type=bool, default=False)
+
+    parser.add_argument('--torch_cp', type=str, default='stylegan2_networks_stylegan2-car-config-f.pt')
+
+    parser.add_argument('--output_path', type=str, default='stylegan2_pytorch.pkl')
+
+    args = parser.parse_args()
+
+    main(args.tf_cp, args.output_path, args.compare, args.torch_cp)
